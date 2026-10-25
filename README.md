@@ -32,3 +32,7 @@ Si Xcode muestra un aviso de licencia, ábrelo y acepta la licencia antes de com
 ## Privacidad
 
 La imagen y el audio se procesan localmente. La app no incluye analítica, cuentas, servicios de red ni subida de contenido.
+
+## Apoya el proyecto
+
+Si Estudio Cámara te resulta útil, puedes apoyar su desarrollo en [Buy Me a Coffee](https://buymeacoffee.com/CarlosGuedea).

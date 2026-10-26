@@ -18,6 +18,7 @@ final class BackgroundProcessor: @unchecked Sendable {
         let foreground = source.oriented(forExifOrientation: 1)
         let extent = foreground.extent
         let sceneExtent = cropRect(for: extent, to: current.aspectRatio)
+        let transform = personTransform(settings: current, sceneExtent: sceneExtent)
         var composed = foreground
 
         switch current.kind {
@@ -28,12 +29,12 @@ final class BackgroundProcessor: @unchecked Sendable {
                 let blurred = foreground.clampedToExtent()
                     .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 24])
                     .cropped(to: extent)
-                composed = blend(foreground: foreground, background: blurred, mask: mask, extent: extent)
+                composed = blend(foreground: foreground, background: blurred, mask: mask, extent: extent, transform: transform)
             }
         case let .color(color):
             if let mask = personMask(for: pixelBuffer, extent: extent), let ciColor = CIColor(color: color) {
                 let background = CIImage(color: ciColor).cropped(to: extent)
-                composed = blend(foreground: foreground, background: background, mask: mask, extent: extent)
+                composed = blend(foreground: foreground, background: background, mask: mask, extent: extent, transform: transform)
             }
         case let .image(url):
             let background: CIImage?
@@ -48,10 +49,44 @@ final class BackgroundProcessor: @unchecked Sendable {
                 let fitted = current.backgroundFit == .fit
                     ? aspectFitWithBlur(background, to: sceneExtent)
                     : aspectFill(background, to: sceneExtent)
-                composed = blend(foreground: foreground, background: fitted, mask: mask, extent: extent)
+                composed = blend(foreground: foreground, background: fitted, mask: mask, extent: extent, transform: transform)
             }
         }
-        return cropAndScale(composed, to: current.aspectRatio)
+        var output = cropAndScale(composed, to: current.aspectRatio)
+        output = applyEffects(output, settings: current)
+        if let overlay = current.overlayImage {
+            output = overlay.applyingFilter("CISourceOverCompositing", parameters: [
+                kCIInputBackgroundImageKey: output
+            ]).cropped(to: output.extent)
+        }
+        return output
+    }
+
+    private func applyEffects(_ image: CIImage, settings: RenderSettings) -> CIImage {
+        var output = image.applyingFilter("CIColorControls", parameters: [
+            kCIInputSaturationKey: settings.saturation,
+            kCIInputContrastKey: settings.contrast
+        ])
+        if settings.exposure != 0 {
+            output = output.applyingFilter("CIExposureAdjust", parameters: [
+                kCIInputEVKey: settings.exposure
+            ])
+        }
+        switch settings.filter {
+        case .none:
+            return output
+        case .vivid:
+            return output.applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 1.35 * settings.saturation,
+                kCIInputContrastKey: 1.08 * settings.contrast
+            ])
+        case .cinema:
+            return output.applyingFilter("CIPhotoEffectProcess")
+        case .warm:
+            return output.applyingFilter("CIPhotoEffectInstant")
+        case .mono:
+            return output.applyingFilter("CIPhotoEffectNoir")
+        }
     }
 
     private func cropRect(for source: CGRect, to aspectRatio: VideoAspectRatio) -> CGRect {
@@ -98,10 +133,19 @@ final class BackgroundProcessor: @unchecked Sendable {
         }
     }
 
-    private func blend(foreground: CIImage, background: CIImage, mask: CIImage, extent: CGRect) -> CIImage {
-        foreground.applyingFilter("CIBlendWithMask", parameters: [
+    private func personTransform(settings: RenderSettings, sceneExtent: CGRect) -> CGAffineTransform {
+        let scale = CGFloat(settings.personScale)
+        let centerX = sceneExtent.midX + sceneExtent.width * CGFloat(settings.personOffsetX)
+        let centerY = sceneExtent.midY + sceneExtent.height * CGFloat(settings.personOffsetY)
+        return CGAffineTransform(translationX: centerX, y: centerY)
+            .scaledBy(x: scale, y: scale)
+            .translatedBy(x: -sceneExtent.midX, y: -sceneExtent.midY)
+    }
+
+    private func blend(foreground: CIImage, background: CIImage, mask: CIImage, extent: CGRect, transform: CGAffineTransform) -> CIImage {
+        foreground.transformed(by: transform).applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: background,
-            kCIInputMaskImageKey: mask
+            kCIInputMaskImageKey: mask.transformed(by: transform)
         ]).cropped(to: extent)
     }
 

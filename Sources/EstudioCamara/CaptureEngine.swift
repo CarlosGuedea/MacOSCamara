@@ -29,13 +29,8 @@ final class CaptureEngine: NSObject, @unchecked Sendable {
         }
     }
 
-    func updateRenderSettings(kind: BackgroundKind, imageURL: URL?, aspectRatio: VideoAspectRatio, backgroundFit: BackgroundFitMode) {
-        settings.update(RenderSettings(
-            kind: kind,
-            backgroundImage: imageURL.flatMap { CIImage(contentsOf: $0, options: [.applyOrientationProperty: true]) },
-            aspectRatio: aspectRatio,
-            backgroundFit: backgroundFit
-        ))
+    func updateRenderSettings(_ settings: RenderSettings) {
+        self.settings.update(settings)
     }
 
     static func devices(for mediaType: AVMediaType) -> [CaptureDeviceItem] {

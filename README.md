@@ -10,8 +10,12 @@ App nativa para macOS que graba video con la cámara del equipo, permite elegir 
 - Selección de cámara y fuente de audio.
 - Fondo original, desenfocado, color sólido o imagen personalizada.
 - Detección de personas mediante Vision, procesada en el dispositivo.
+- Escala y movimiento de la persona mediante arrastre o controles de posición.
+- Filtros creativos y controles de exposición, contraste y saturación.
+- Títulos y subtítulos con posición y tamaño configurables.
+- Cuadrícula de tercios y captura de fotos en PNG.
 - Grabación con video H.264 y audio AAC.
-- Guardado automático en `Películas/Estudio Cámara`.
+- Guardado automático en `Películas/Estudio Cámara` y `Imágenes/Estudio Cámara`.
 
 ## Requisitos
 

@@ -13,6 +13,18 @@ final class StudioViewModel: ObservableObject {
     @Published var backgroundKind: BackgroundKind = .original
     @Published var backgroundFit: BackgroundFitMode = .fit
     @Published var aspectRatio: VideoAspectRatio = .landscape
+    @Published var selectedPanel: StudioPanel = .studio
+    @Published var filter: VideoFilter = .none
+    @Published var exposure = 0.0
+    @Published var saturation = 1.0
+    @Published var contrast = 1.0
+    @Published var personScale = 1.0
+    @Published var personOffsetX = 0.0
+    @Published var personOffsetY = 0.0
+    @Published var overlayText = ""
+    @Published var overlayPosition: OverlayPosition = .bottom
+    @Published var overlayScale = 1.0
+    @Published var showGrid = false
     @Published var isPreviewMirrored = true
     @Published var isRecording = false
     @Published var isFinalizing = false
@@ -20,6 +32,8 @@ final class StudioViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRecordingURL: URL?
     @Published var showSavedMessage = false
+    @Published var lastSnapshotURL: URL?
+    @Published var showSnapshotMessage = false
 
     let colorOptions: [(String, NSColor)] = [
         ("Grafito", NSColor(calibratedRed: 0.10, green: 0.12, blue: 0.17, alpha: 1)),
@@ -31,6 +45,7 @@ final class StudioViewModel: ObservableObject {
     private let engine = CaptureEngine()
     private var timerTask: Task<Void, Never>?
     private var startedAt: Date?
+    private var personDragOrigin: CGPoint?
 
     var canRecord: Bool {
         !selectedCameraID.isEmpty && !selectedMicrophoneID.isEmpty && !isFinalizing && previewImage != nil
@@ -109,13 +124,86 @@ final class StudioViewModel: ObservableObject {
         updateRenderSettings()
     }
 
+    func selectFilter(_ newFilter: VideoFilter) {
+        filter = newFilter
+        updateRenderSettings()
+    }
+
+    func effectsChanged() {
+        updateRenderSettings()
+    }
+
+    func overlayChanged() {
+        if hasOverlayText { isPreviewMirrored = false }
+        updateRenderSettings()
+    }
+
+    func resetEffects() {
+        filter = .none
+        exposure = 0
+        saturation = 1
+        contrast = 1
+        updateRenderSettings()
+    }
+
+    func personChanged() {
+        updateRenderSettings()
+    }
+
+    func resetPersonTransform() {
+        personScale = 1
+        personOffsetX = 0
+        personOffsetY = 0
+        updateRenderSettings()
+    }
+
+    func dragPerson(translation: CGSize, previewSize: CGSize) {
+        guard canMovePerson, previewSize.width > 0, previewSize.height > 0 else { return }
+        if personDragOrigin == nil {
+            personDragOrigin = CGPoint(x: personOffsetX, y: personOffsetY)
+        }
+        guard let origin = personDragOrigin else { return }
+        let mirrorDirection = isPreviewMirrored && !hasOverlayText ? -1.0 : 1.0
+        let x = Double(origin.x) + mirrorDirection * Double(translation.width) / Double(previewSize.width)
+        let y = Double(origin.y) - Double(translation.height) / Double(previewSize.height)
+        personOffsetX = min(0.8, max(-0.8, x))
+        personOffsetY = min(0.8, max(-0.8, y))
+        updateRenderSettings()
+    }
+
+    func endPersonDrag() {
+        personDragOrigin = nil
+    }
+
+    var canMovePerson: Bool {
+        backgroundKind != .original
+    }
+
+    var hasOverlayText: Bool {
+        !overlayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func updateRenderSettings() {
-        engine.updateRenderSettings(
+        let settings = RenderSettings(
             kind: backgroundKind,
-            imageURL: backgroundKind.imageURL,
+            backgroundImage: backgroundKind.imageURL.flatMap { CIImage(contentsOf: $0, options: [.applyOrientationProperty: true]) },
             aspectRatio: aspectRatio,
-            backgroundFit: backgroundFit
+            backgroundFit: backgroundFit,
+            filter: filter,
+            exposure: exposure,
+            saturation: saturation,
+            contrast: contrast,
+            personScale: personScale,
+            personOffsetX: personOffsetX,
+            personOffsetY: personOffsetY,
+            overlayImage: OverlayImageFactory.make(
+                text: overlayText,
+                position: overlayPosition,
+                scale: overlayScale,
+                aspectRatio: aspectRatio
+            )
         )
+        engine.updateRenderSettings(settings)
     }
 
     func chooseBackgroundImage() {
@@ -158,6 +246,30 @@ final class StudioViewModel: ObservableObject {
     func revealRecording() {
         guard let lastRecordingURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([lastRecordingURL])
+    }
+
+    func saveSnapshot() {
+        guard let previewImage else { return }
+        do {
+            let directory = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Estudio Cámara", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            let url = directory.appendingPathComponent("Foto_\(formatter.string(from: Date())).png")
+            let bitmap = NSBitmapImageRep(cgImage: previewImage)
+            guard let data = bitmap.representation(using: .png, properties: [:]) else { return }
+            try data.write(to: url, options: .atomic)
+            lastSnapshotURL = url
+            showSnapshotMessage = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func revealSnapshot() {
+        guard let lastSnapshotURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([lastSnapshotURL])
     }
 
     func openPrivacySettings() {

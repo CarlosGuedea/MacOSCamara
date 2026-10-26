@@ -75,11 +75,54 @@ enum BackgroundFitMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum StudioPanel: String, CaseIterable, Identifiable {
+    case studio = "Estudio"
+    case effects = "Efectos"
+    case text = "Texto"
+
+    var id: String { rawValue }
+}
+
+enum VideoFilter: String, CaseIterable, Identifiable {
+    case none = "Original"
+    case vivid = "Vivo"
+    case cinema = "Cine"
+    case warm = "Cálido"
+    case mono = "Noir"
+
+    var id: String { rawValue }
+    var systemImage: String {
+        switch self {
+        case .none: return "circle"
+        case .vivid: return "sparkles"
+        case .cinema: return "film"
+        case .warm: return "sun.max"
+        case .mono: return "circle.lefthalf.filled"
+        }
+    }
+}
+
+enum OverlayPosition: String, CaseIterable, Identifiable {
+    case top = "Arriba"
+    case center = "Centro"
+    case bottom = "Abajo"
+
+    var id: String { rawValue }
+}
+
 struct RenderSettings {
     var kind: BackgroundKind = .original
     var backgroundImage: CIImage?
     var aspectRatio: VideoAspectRatio = .landscape
     var backgroundFit: BackgroundFitMode = .fit
+    var filter: VideoFilter = .none
+    var exposure: Double = 0
+    var saturation: Double = 1
+    var contrast: Double = 1
+    var personScale: Double = 1
+    var personOffsetX: Double = 0
+    var personOffsetY: Double = 0
+    var overlayImage: CIImage?
 }
 
 final class RenderSettingsStore: @unchecked Sendable {

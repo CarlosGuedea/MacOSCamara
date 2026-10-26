@@ -10,7 +10,7 @@ struct StudioView: View {
             HStack(spacing: 0) {
                 previewSection
                 Divider().overlay(AppColors.line)
-                controls
+                controlPanel
             }
         }
         .background(AppColors.window)
@@ -20,6 +20,12 @@ struct StudioView: View {
             Button("Aceptar", role: .cancel) { }
         } message: {
             Text("Tu video está listo en Películas › Estudio Cámara.")
+        }
+        .alert("Foto guardada", isPresented: $model.showSnapshotMessage) {
+            Button("Mostrar en Finder") { model.revealSnapshot() }
+            Button("Aceptar", role: .cancel) { }
+        } message: {
+            Text("Tu foto está lista en Imágenes › Estudio Cámara.")
         }
     }
 
@@ -61,7 +67,7 @@ struct StudioView: View {
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .scaleEffect(x: model.isPreviewMirrored ? -1 : 1, y: 1)
+                        .scaleEffect(x: model.isPreviewMirrored && !model.hasOverlayText ? -1 : 1, y: 1)
                         .clipShape(RoundedRectangle(cornerRadius: 18))
                 } else {
                     VStack(spacing: 14) {
@@ -79,8 +85,25 @@ struct StudioView: View {
                     }
                     .padding(30)
                 }
+                GeometryReader { geometry in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 1)
+                                .onChanged { value in
+                                    model.dragPerson(translation: value.translation, previewSize: geometry.size)
+                                }
+                                .onEnded { _ in model.endPersonDrag() }
+                        )
+                        .allowsHitTesting(model.canMovePerson)
+                }
             }
             .aspectRatio(model.aspectRatio.ratio, contentMode: .fit)
+            .overlay {
+                if model.showGrid {
+                    GridOverlay().allowsHitTesting(false)
+                }
+            }
             .overlay(alignment: .bottomLeading) {
                 if model.previewImage != nil {
                     Label(backgroundLabel, systemImage: "person.crop.rectangle")
@@ -91,13 +114,26 @@ struct StudioView: View {
                 }
             }
 
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button { model.isPreviewMirrored.toggle() } label: {
                     Label("Espejo", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                 }
                 .buttonStyle(.bordered)
                 .tint(model.isPreviewMirrored ? AppColors.accent : .secondary)
-                .disabled(model.isRecording)
+                .disabled(model.isRecording || model.hasOverlayText)
+                .help(model.hasOverlayText ? "El modo espejo se desactiva para mantener el texto legible" : "Vista en espejo")
+
+                Button { model.showGrid.toggle() } label: {
+                    Label("Cuadrícula", systemImage: "grid")
+                }
+                .buttonStyle(.bordered)
+                .tint(model.showGrid ? AppColors.accent : .secondary)
+
+                Button { model.saveSnapshot() } label: {
+                    Label("Foto", systemImage: "camera.shutter.button")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.previewImage == nil)
 
                 Button { model.toggleRecording() } label: {
                     HStack(spacing: 9) {
@@ -125,7 +161,31 @@ struct StudioView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var controls: some View {
+    private var controlPanel: some View {
+        VStack(spacing: 0) {
+            Picker("Panel creativo", selection: $model.selectedPanel) {
+                ForEach(StudioPanel.allCases) { panel in
+                    Text(panel.rawValue).tag(panel)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(16)
+            .background(AppColors.panel)
+            Divider().overlay(AppColors.line)
+            if model.selectedPanel == .studio {
+                studioControls
+            } else if model.selectedPanel == .effects {
+                effectsControls
+            } else {
+                textControls
+            }
+        }
+        .frame(width: 320)
+        .background(AppColors.panel)
+    }
+
+    private var studioControls: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -214,6 +274,21 @@ struct StudioView: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if model.canMovePerson {
+                        Divider().overlay(AppColors.line)
+                        sectionTitle("Mi imagen", icon: "person.crop.rectangle")
+                        personSlider(title: "Tamaño", value: $model.personScale, range: 0.5...1.8, display: String(format: "%.0f%%", model.personScale * 100))
+                        personSlider(title: "Horizontal", value: $model.personOffsetX, range: -0.8...0.8, display: String(format: "%.2f", model.personOffsetX))
+                        personSlider(title: "Vertical", value: $model.personOffsetY, range: -0.8...0.8, display: String(format: "%.2f", model.personOffsetY))
+                        Label("También puedes arrastrar tu figura directamente sobre la vista previa.", systemImage: "hand.draw")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button { model.resetPersonTransform() } label: {
+                            Label("Centrar y restablecer tamaño", systemImage: "arrow.counterclockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     Text("La sustitución usa detección de personas en tiempo real. Para un mejor resultado, usa luz frontal y evita fondos muy recargados.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -227,6 +302,143 @@ struct StudioView: View {
         }
         .frame(width: 320)
         .background(AppColors.panel)
+    }
+
+    private var effectsControls: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 14) {
+                    sectionTitle("Filtros", icon: "camera.filters")
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
+                        ForEach(VideoFilter.allCases) { filter in
+                            filterCard(filter)
+                        }
+                    }
+                }
+
+                Divider().overlay(AppColors.line)
+
+                VStack(alignment: .leading, spacing: 18) {
+                    sectionTitle("Ajustes", icon: "slider.horizontal.3")
+                    adjustmentSlider(title: "Exposición", value: $model.exposure, range: -2...2, display: String(format: "%.1f EV", model.exposure))
+                    adjustmentSlider(title: "Saturación", value: $model.saturation, range: 0...2, display: String(format: "%.0f%%", model.saturation * 100))
+                    adjustmentSlider(title: "Contraste", value: $model.contrast, range: 0.5...1.5, display: String(format: "%.0f%%", model.contrast * 100))
+                    Button { model.resetEffects() } label: {
+                        Label("Restablecer efectos", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Label("Los filtros y ajustes se incluyen en las fotos y grabaciones.", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(22)
+        }
+        .frame(width: 320)
+        .background(AppColors.panel)
+    }
+
+    private var textControls: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionTitle("Texto sobre video", icon: "textformat")
+                    TextField("Escribe un título o subtítulo", text: $model.overlayText, axis: .vertical)
+                        .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: model.overlayText) { _, _ in model.overlayChanged() }
+                    HStack(spacing: 8) {
+                        ForEach(["¡Hola!", "Nuevo video", "Sígueme"], id: \.self) { text in
+                            Button(text) {
+                                model.overlayText = text
+                                model.overlayChanged()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Posición").font(.caption).foregroundStyle(.secondary)
+                    Picker("Posición", selection: $model.overlayPosition) {
+                        ForEach(OverlayPosition.allCases) { position in
+                            Text(position.rawValue).tag(position)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .onChange(of: model.overlayPosition) { _, _ in model.overlayChanged() }
+                }
+
+                adjustmentSlider(title: "Tamaño", value: $model.overlayScale, range: 0.65...1.6, display: String(format: "%.0f%%", model.overlayScale * 100), changesOverlay: true)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "text.bubble.fill").font(.title2).foregroundStyle(AppColors.accent)
+                    Text("El texto se verá en la grabación y en las fotos. La cuadrícula solo es una guía y no se exporta.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(AppColors.raised, in: RoundedRectangle(cornerRadius: 10))
+
+                if model.hasOverlayText {
+                    Button { model.overlayText = ""; model.overlayChanged() } label: {
+                        Label("Quitar texto", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppColors.recording)
+                }
+            }
+            .padding(22)
+        }
+        .frame(width: 320)
+        .background(AppColors.panel)
+    }
+
+    private func filterCard(_ filter: VideoFilter) -> some View {
+        let selected = model.filter == filter
+        return Button { model.selectFilter(filter) } label: {
+            VStack(spacing: 8) {
+                Image(systemName: filter.systemImage).font(.title3)
+                Text(filter.rawValue).font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(selected ? .white : .secondary)
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(selected ? AppColors.accent.opacity(0.25) : AppColors.raised, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? AppColors.accent : AppColors.line, lineWidth: selected ? 2 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func adjustmentSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, display: String, changesOverlay: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(display).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+                .tint(AppColors.accent)
+                .onChange(of: value.wrappedValue) { _, _ in
+                    changesOverlay ? model.overlayChanged() : model.effectsChanged()
+                }
+        }
+    }
+
+    private func personSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, display: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(display).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+                .tint(AppColors.accent)
+                .onChange(of: value.wrappedValue) { _, _ in model.personChanged() }
+        }
     }
 
     private func sectionTitle(_ title: String, icon: String) -> some View {
@@ -269,5 +481,24 @@ struct StudioView: View {
         case .color: return "Color sólido"
         case .image: return "Imagen personalizada"
         }
+    }
+}
+
+private struct GridOverlay: View {
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                let width = geometry.size.width
+                let height = geometry.size.height
+                for fraction in [1.0 / 3.0, 2.0 / 3.0] {
+                    path.move(to: CGPoint(x: width * fraction, y: 0))
+                    path.addLine(to: CGPoint(x: width * fraction, y: height))
+                    path.move(to: CGPoint(x: 0, y: height * fraction))
+                    path.addLine(to: CGPoint(x: width, y: height * fraction))
+                }
+            }
+            .stroke(.white.opacity(0.5), style: StrokeStyle(lineWidth: 0.7, dash: [5, 4]))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 }
